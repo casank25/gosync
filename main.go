@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -76,9 +74,7 @@ func run(sess *session.Session) {
 				return false
 			}
 
-			fmt.Println("Enqueued ", enqueued, " jobs")
 			return true
-
 		},
 	)
 
@@ -98,11 +94,8 @@ func watch() {
 		case page := <-pages:
 			count = count + page.count
 			done = page.last
-			fmt.Println("Adding page. Total: ", count)
-			fmt.Println("Last: ", done)
 		case <-processed:
 			count--
-			fmt.Println("Count", count)
 			if done && count == 0 {
 				allDone <- true
 				return

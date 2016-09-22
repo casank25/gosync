@@ -50,6 +50,8 @@ func (w Worker) process(j Job) {
 	}
 
 	_, err := svc.CopyObject(params)
+
+	lastObject = *j.object.Key
 	processed <- true
 	if err != nil {
 		err_log.WithFields(log.Fields{"Size": *j.object.Size, "Name": *j.object.Key}).

@@ -6,6 +6,7 @@ import (
 )
 
 var err_log = log.New()
+var info_log = log.New()
 
 func logger(logger *log.Logger, filename string) {
 	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0755)

@@ -31,6 +31,7 @@ type Job struct {
 
 func main() {
 	logger(err_log, "errors.log")
+	logger(info_log, "info.log")
 	options = getOptions()
 
 	sess, sess_err := session.NewSession(&aws.Config{
@@ -67,9 +68,13 @@ func run(sess *session.Session) {
 	}
 
 	go track()
+	c := 0
 	list_err := svc.ListObjectsV2Pages(params,
 		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
 			enqueued := 0
+			c++
+			info_log.WithFields(log.Fields{"Key": *page.Contents[0].Key}).
+				Info("Page ", c, " starting point")
 			for _, obj := range page.Contents {
 				enqueued++
 				job := Job{id: enqueued, object: obj}

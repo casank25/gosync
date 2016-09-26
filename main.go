@@ -1,9 +1,6 @@
 package main
 
 import (
-	"os"
-	"os/signal"
-
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -12,21 +9,21 @@ import (
 
 var JobQueue chan Job
 var pages chan Page
-var processed chan bool
+var processed chan Job
 var allDone chan bool
-var interrupt chan os.Signal
-var lastObject string
 
 var svc *s3.S3
 
 type Page struct {
 	count int
+	page  int
 	last  bool
 }
 
 type Job struct {
 	id     int
 	object *s3.Object
+	page   int
 }
 
 func main() {
@@ -45,11 +42,8 @@ func main() {
 
 	JobQueue = make(chan Job, options.Queue)
 	pages = make(chan Page, 1000)
-	processed = make(chan bool, options.Queue)
+	processed = make(chan Job, options.Queue)
 	allDone = make(chan bool, 1)
-	interrupt = make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	go listen()
 
 	dispatcher := NewDispatcher(options.Workers)
 	dispatcher.Run()
@@ -67,20 +61,19 @@ func run(sess *session.Session) {
 		params.StartAfter = &options.Start
 	}
 
-	go track()
+	go watch()
 	c := 0
 	list_err := svc.ListObjectsV2Pages(params,
 		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
 			enqueued := 0
 			c++
-			info_log.WithFields(log.Fields{"Key": *page.Contents[0].Key}).
-				Info("Page ", c, " starting point")
+
 			for _, obj := range page.Contents {
 				enqueued++
-				job := Job{id: enqueued, object: obj}
+				job := Job{id: enqueued, object: obj, page: c}
 				JobQueue <- job
 			}
-			p := Page{count: enqueued, last: lastPage}
+			p := Page{count: enqueued, page: c, last: lastPage}
 			pages <- p
 
 			if lastPage {
@@ -98,32 +91,27 @@ func run(sess *session.Session) {
 	<-allDone
 }
 
-// tracks for added and processed objects and defines when all of them have been copied
-func track() {
+// watches each page for added and processed objects, determines when it's done and logs finished
+func watch() {
 	done := false
-	count := 0
+	p := make(map[int]int) //page:count
 
 	for {
 		select {
 		case page := <-pages:
-			count = count + page.count
+			p[page.page] = page.count
 			done = page.last
-		case <-processed:
-			count--
-			if done && count == 0 {
+		case job := <-processed:
+			p[job.page]--
+			if p[job.page] == 0 {
+				info_log.WithFields(log.Fields{"Key": *job.object.Key, "Page": job.page, "Done": true}).
+					Info("Page ", job.page, " finished all jobs")
+				delete(p, job.page)
+			}
+			if done && len(p) == 0 {
 				allDone <- true
 				return
 			}
 		}
 	}
-}
-
-// listens for CTRL-C command from user and records the last copied object
-func listen() {
-	<-interrupt
-	close(JobQueue)
-	close(pages)
-	close(processed)
-	err_log.Error("Program interrupted by user. Last object copied: ", lastObject)
-	os.Exit(1)
 }

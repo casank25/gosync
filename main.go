@@ -1,18 +1,18 @@
 package main
 
-import (
-	log "github.com/Sirupsen/logrus"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+import log "github.com/Sirupsen/logrus"
+
+var (
+	JobQueue      chan Job
+	pages         chan Page
+	processed     chan Job
+	lineEnqueued  chan bool
+	lineProcessed chan bool
+	allDone       chan bool
+
+	source  Source
+	service *Service
 )
-
-var JobQueue chan Job
-var pages chan Page
-var processed chan Job
-var allDone chan bool
-
-var svc *s3.S3
 
 type Page struct {
 	count int
@@ -21,78 +21,41 @@ type Page struct {
 }
 
 type Job struct {
-	id     int
-	object *s3.Object
-	page   int
+	id   int
+	key  string
+	page int
 }
 
-func main() {
+func init() {
 	logger(err_log, "errors.log")
 	logger(info_log, "info.log")
 	options = getOptions()
+}
 
-	sess, sess_err := session.NewSession(&aws.Config{
-		Region:     aws.String(options.Region),
-		MaxRetries: &options.Retries,
-	},
-	)
-	if sess_err != nil {
-		log.Fatal("Session Error: ", sess_err.Error())
+func main() {
+	service = NewService()
+	if options.Reader == "file" {
+		source = NewFileSource(options.FilePath)
+		lineEnqueued = make(chan bool, options.Queue)
+		lineProcessed = make(chan bool, options.Queue)
+	} else {
+		source = NewS3Source()
+		pages = make(chan Page, 1000)
+		processed = make(chan Job, options.Queue)
 	}
 
 	JobQueue = make(chan Job, options.Queue)
-	pages = make(chan Page, 1000)
-	processed = make(chan Job, options.Queue)
 	allDone = make(chan bool, 1)
 
 	dispatcher := NewDispatcher(options.Workers)
 	dispatcher.Run()
 
-	run(sess)
-
-}
-
-func run(sess *session.Session) {
-	svc = s3.New(sess)
-	params := &s3.ListObjectsV2Input{
-		Bucket: aws.String(options.Source),
-	}
-	if options.Start != "" {
-		params.StartAfter = &options.Start
-	}
-
-	go watch()
-	c := 0
-	list_err := svc.ListObjectsV2Pages(params,
-		func(page *s3.ListObjectsV2Output, lastPage bool) bool {
-			enqueued := 0
-			c++
-
-			for _, obj := range page.Contents {
-				enqueued++
-				job := Job{id: enqueued, object: obj, page: c}
-				JobQueue <- job
-			}
-			p := Page{count: enqueued, page: c, last: lastPage}
-			pages <- p
-
-			if lastPage {
-				return false
-			}
-
-			return true
-		},
-	)
-
-	if list_err != nil {
-		log.Fatal("Could not list pages: ", list_err.Error())
-	}
-
-	<-allDone
+	source.Run()
 }
 
 // watches each page for added and processed objects, determines when it's done and logs finished
 func watch() {
+	lines := 0
 	done := false
 	p := make(map[int]int) //page:count
 
@@ -104,7 +67,7 @@ func watch() {
 		case job := <-processed:
 			p[job.page]--
 			if p[job.page] == 0 {
-				info_log.WithFields(log.Fields{"Key": *job.object.Key, "Page": job.page, "Done": true}).
+				info_log.WithFields(log.Fields{"Key": job.key, "Page": job.page, "Done": true}).
 					Info("Page ", job.page, " finished all jobs")
 				delete(p, job.page)
 			}
@@ -112,6 +75,15 @@ func watch() {
 				allDone <- true
 				return
 			}
+		case <-lineEnqueued:
+			lines++
+		case <-lineProcessed:
+			lines--
+			if lines == 0 {
+				allDone <- true
+				return
+			}
+
 		}
 	}
 }

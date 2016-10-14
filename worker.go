@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -42,18 +44,25 @@ func (w Worker) Stop() {
 }
 
 func (w Worker) process(j Job) {
-	copySource := options.Source + "/" + *j.object.Key
+	copySource := options.Source + "/" + j.key
 	params := &s3.CopyObjectInput{
 		Bucket:     aws.String(options.Destination),
 		CopySource: aws.String(copySource),
-		Key:        j.object.Key,
+		Key:        aws.String(j.key),
 	}
 
-	_, err := svc.CopyObject(params)
+	fmt.Println("Copying Object: ", j.key)
+	_, err := service.Client.CopyObject(params)
 
-	processed <- j
+	switch options.Reader {
+	case "s3":
+		processed <- j
+	case "file":
+		lineProcessed <- true
+	}
+
 	if err != nil {
-		err_log.WithFields(log.Fields{"Size": *j.object.Size, "Name": *j.object.Key}).
+		err_log.WithFields(log.Fields{"Name": j.key}).
 			Error("Copy Error:", err.Error())
 	}
 }

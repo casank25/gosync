@@ -21,7 +21,6 @@ func (d *Dispatcher) Dispatch() {
 	for {
 		select {
 		case job := <-JobQueue:
-			//print something here
 			go func(job Job) {
 				jobChannel := <-d.WorkerPool
 				jobChannel <- job

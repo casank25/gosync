@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	log "github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -51,14 +49,13 @@ func (w Worker) process(j Job) {
 		Key:        aws.String(j.key),
 	}
 
-	fmt.Println("Copying Object: ", j.key)
 	_, err := service.Client.CopyObject(params)
 
 	switch options.Reader {
 	case "s3":
 		processed <- j
 	case "file":
-		lineProcessed <- true
+		lineProcessed <- j
 	}
 
 	if err != nil {

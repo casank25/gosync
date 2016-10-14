@@ -7,7 +7,7 @@ var (
 	pages         chan Page
 	processed     chan Job
 	lineEnqueued  chan bool
-	lineProcessed chan bool
+	lineProcessed chan Job
 	allDone       chan bool
 
 	source  Source
@@ -37,7 +37,7 @@ func main() {
 	if options.Reader == "file" {
 		source = NewFileSource(options.FilePath)
 		lineEnqueued = make(chan bool, options.Queue)
-		lineProcessed = make(chan bool, options.Queue)
+		lineProcessed = make(chan Job, options.Queue)
 	} else {
 		source = NewS3Source()
 		pages = make(chan Page, 1000)
@@ -77,8 +77,10 @@ func watch() {
 			}
 		case <-lineEnqueued:
 			lines++
-		case <-lineProcessed:
+		case job := <-lineProcessed:
 			lines--
+			info_log.WithFields(log.Fields{"Key": job.key}).
+				Info("Object copied")
 			if lines == 0 {
 				allDone <- true
 				return
